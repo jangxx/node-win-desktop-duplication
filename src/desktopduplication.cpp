@@ -1,6 +1,6 @@
 #include "desktopduplication.h"
 
-DesktopDuplication::DesktopDuplication(const Napi::CallbackInfo &info) : Napi::ObjectWrap<DesktopDuplication>(info), m_Device(nullptr), m_Context(nullptr), m_DesktopDup(nullptr), m_LastImage(nullptr), m_SharedImage(nullptr) {
+DesktopDuplication::DesktopDuplication(const Napi::CallbackInfo &info) : Napi::ObjectWrap<DesktopDuplication>(info), m_Device(nullptr), m_Context(nullptr), m_DesktopDup(nullptr), m_LastImage(nullptr) {
 	UINT outputNum = info[0].As<Napi::Number>().Uint32Value();
 	m_OutputNumber = outputNum;
 
@@ -9,6 +9,9 @@ DesktopDuplication::DesktopDuplication(const Napi::CallbackInfo &info) : Napi::O
 
 void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
 	Napi::Env env = info.Env();
+
+	// call cleanup so we can call this function multiple times without memory leaks
+	cleanUp();
 
 	HRESULT hr = S_OK;
 
@@ -78,29 +81,6 @@ void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
 
 	DxgiOutput->GetDesc(&m_OutputDesc);
 
-	// create shared surface to copy aquired image to
-
-	D3D11_TEXTURE2D_DESC DeskTexD;
-	RtlZeroMemory(&DeskTexD, sizeof(D3D11_TEXTURE2D_DESC));
-
-    DeskTexD.Width = m_OutputDesc.DesktopCoordinates.right - m_OutputDesc.DesktopCoordinates.left;
-    DeskTexD.Height = m_OutputDesc.DesktopCoordinates.bottom - m_OutputDesc.DesktopCoordinates.top;
-    DeskTexD.MipLevels = 1;
-    DeskTexD.ArraySize = 1;
-    DeskTexD.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    DeskTexD.SampleDesc.Count = 1;
-    DeskTexD.Usage = D3D11_USAGE_DEFAULT;
-    DeskTexD.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    DeskTexD.CPUAccessFlags = 0;
-    DeskTexD.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
-
-	hr = m_Device->CreateTexture2D(&DeskTexD, nullptr, &m_SharedImage);
-    if (FAILED(hr)) {
-		Napi::Error::New(env, "Failed to create shared surface: " + std::system_category().message(hr)).ThrowAsJavaScriptException();
-		cleanUp();
-		return;
-	}
-
 	// QI for Output 1
 	IDXGIOutput1* DxgiOutput1 = nullptr;
 	hr = DxgiOutput->QueryInterface(__uuidof(DxgiOutput1), reinterpret_cast<void**>(&DxgiOutput1));
@@ -138,10 +118,15 @@ Napi::Value DesktopDuplication::getFrame(const Napi::CallbackInfo &info) {
     DXGI_OUTDUPL_FRAME_INFO FrameInfo;
 
     // Get new frame
-    HRESULT hr = m_DesktopDup->AcquireNextFrame(500, &FrameInfo, &DesktopResource);
+    HRESULT hr = m_DesktopDup->AcquireNextFrame(1000, &FrameInfo, &DesktopResource);
 
     if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
 		result.Set("result", Napi::String::New(env, "timeout"));
+		return result;
+    }
+
+	if (hr == DXGI_ERROR_ACCESS_LOST) {
+		result.Set("result", Napi::String::New(env, "accesslost"));
 		return result;
     }
 
@@ -168,13 +153,37 @@ Napi::Value DesktopDuplication::getFrame(const Napi::CallbackInfo &info) {
         return result;
     }
 
+	D3D11_TEXTURE2D_DESC frameDesc;
+	m_LastImage->GetDesc(&frameDesc);
+
+	// create shared surface to copy aquired image to
+	D3D11_TEXTURE2D_DESC stagingTextureDesc;
+    stagingTextureDesc.Width = frameDesc.Width;
+    stagingTextureDesc.Height = frameDesc.Height;
+    stagingTextureDesc.MipLevels = frameDesc.MipLevels;
+    stagingTextureDesc.ArraySize = 1;
+    stagingTextureDesc.Format = frameDesc.Format;
+    stagingTextureDesc.SampleDesc = frameDesc.SampleDesc;
+    stagingTextureDesc.Usage = D3D11_USAGE_STAGING;
+    stagingTextureDesc.BindFlags = 0;
+    stagingTextureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    stagingTextureDesc.MiscFlags = 0;
+
+	ID3D11Texture2D* stagingTexture = nullptr;
+
+	hr = m_Device->CreateTexture2D(&stagingTextureDesc, nullptr, &stagingTexture);
+    if (FAILED(hr)) {
+		result.Set("result", "error");
+		result.Set("error", Napi::String::New(env, "Failed to create shared surface: " + std::system_category().message(hr)));
+		return result;
+	}
+
 	// copy frame into shared texture
-	m_Context->CopyResource(m_SharedImage, m_LastImage);
+	m_Context->CopyResource(stagingTexture, m_LastImage);
 
 	D3D11_MAPPED_SUBRESOURCE resourceAccess;
-	RtlZeroMemory(&resourceAccess, sizeof(D3D11_MAPPED_SUBRESOURCE));
 
-	hr = m_Context->Map(m_SharedImage, 0, D3D11_MAP_READ, 0, &resourceAccess);
+	hr = m_Context->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &resourceAccess);
 
 	if (FAILED(hr)) {
 		result.Set("result", "error");
@@ -182,15 +191,19 @@ Napi::Value DesktopDuplication::getFrame(const Napi::CallbackInfo &info) {
         return result;
     }
 
-	Napi::Buffer<char> buf = Napi::Buffer<char>::New(env, reinterpret_cast<char*>(resourceAccess.pData), resourceAccess.RowPitch);
+	void* imgData = malloc(stagingTextureDesc.Width * stagingTextureDesc.Height * 4);
+	memcpy(imgData, resourceAccess.pData, stagingTextureDesc.Width * stagingTextureDesc.Height * 4);
 
-	long width = m_OutputDesc.DesktopCoordinates.right - m_OutputDesc.DesktopCoordinates.left;
-	long height = m_OutputDesc.DesktopCoordinates.bottom - m_OutputDesc.DesktopCoordinates.top;
+	Napi::Buffer<char> buf = Napi::Buffer<char>::New(env, reinterpret_cast<char*>(imgData), stagingTextureDesc.Width * stagingTextureDesc.Height * 4, [](Napi::Env env, char* data) { free(data); } );
+
+	m_Context->Unmap(stagingTexture, 0);
+	stagingTexture->Release();
+	m_DesktopDup->ReleaseFrame();
 
 	result.Set("result", "success");
 	result.Set("data", buf);
-	result.Set("width", Napi::Number::New(env, (double)width));
-	result.Set("height", Napi::Number::New(env, (double)height));
+	result.Set("width", Napi::Number::New(env, (double)stagingTextureDesc.Width));
+	result.Set("height", Napi::Number::New(env, (double)stagingTextureDesc.Height));
 
 	return result;
 }
@@ -209,11 +222,6 @@ void DesktopDuplication::cleanUp() {
         m_LastImage->Release();
         m_LastImage = nullptr;
     }
-
-	if (m_SharedImage) {
-		m_SharedImage->Release();
-		m_SharedImage = nullptr;
-	}
 
     if (m_Device) {
         m_Device->Release();

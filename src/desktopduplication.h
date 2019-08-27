@@ -27,5 +27,4 @@ class DesktopDuplication : public Napi::ObjectWrap<DesktopDuplication> {
 		UINT m_OutputNumber;
 		DXGI_OUTPUT_DESC m_OutputDesc;
 		ID3D11Texture2D* m_LastImage;
-		ID3D11Texture2D* m_SharedImage;
 };
