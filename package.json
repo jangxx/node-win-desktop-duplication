@@ -1,0 +1,32 @@
+{
+  "name": "windows-desktop-duplication",
+  "version": "1.0.0",
+  "description": "A screengrabbing library which uses the Windows Desktop Duplication API",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "install": "node-gyp rebuild"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jangxx/node-win-desktop-duplication.git"
+  },
+  "keywords": [
+    "winapi",
+    "screen",
+    "capture",
+    "desktop",
+    "duplication",
+    "native"
+  ],
+  "author": "jangxx <jangxx@protonmail.com>",
+  "license": "MIT",
+  "gypfile": true,
+  "bugs": {
+    "url": "https://github.com/jangxx/node-win-desktop-duplication/issues"
+  },
+  "homepage": "https://github.com/jangxx/node-win-desktop-duplication#readme",
+  "dependencies": {
+    "node-addon-api": "^1.7.1"
+  }
+}
