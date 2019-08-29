@@ -7,13 +7,29 @@
 #include <dxgi1_2.h>
 #include <system_error>
 
+enum RESULT_TYPE {
+	RESULT_SUCCESS,
+	RESULT_ERROR,
+	RESULT_TIMEOUT,
+	RESULT_ACCESSLOST
+};
+
+typedef struct {
+	RESULT_TYPE result;
+	std::string error;
+	char* data;
+	UINT width;
+	UINT height;
+} FRAME_DATA;
+
 class DesktopDuplication : public Napi::ObjectWrap<DesktopDuplication> {
 	public:
 		static Napi::Object Init(Napi::Env env, Napi::Object exports);
 		
 		DesktopDuplication(const Napi::CallbackInfo &info);
 		void initialize(const Napi::CallbackInfo &info);
-		Napi::Value getFrame(const Napi::CallbackInfo &info);
+		FRAME_DATA getFrame();
+		Napi::Value wrap_getFrame(const Napi::CallbackInfo &info);
 		~DesktopDuplication();
 
 	private:

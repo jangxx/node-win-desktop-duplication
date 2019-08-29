@@ -108,11 +108,8 @@ void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
 	}
 }
 
-Napi::Value DesktopDuplication::getFrame(const Napi::CallbackInfo &info) {
-	Napi::Env env = info.Env();
-
-	Napi::Object result = Napi::Object::New(env);
-	result.Set("error", env.Null());
+FRAME_DATA DesktopDuplication::getFrame() {
+	FRAME_DATA result;	
 
 	IDXGIResource* DesktopResource = nullptr;
     DXGI_OUTDUPL_FRAME_INFO FrameInfo;
@@ -121,18 +118,18 @@ Napi::Value DesktopDuplication::getFrame(const Napi::CallbackInfo &info) {
     HRESULT hr = m_DesktopDup->AcquireNextFrame(1000, &FrameInfo, &DesktopResource);
 
     if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-		result.Set("result", Napi::String::New(env, "timeout"));
+		result.result = RESULT_TIMEOUT;
 		return result;
     }
 
 	if (hr == DXGI_ERROR_ACCESS_LOST) {
-		result.Set("result", Napi::String::New(env, "accesslost"));
+		result.result = RESULT_ACCESSLOST;
 		return result;
     }
 
     if (FAILED(hr)) {
-		result.Set("result", "error");
-		result.Set("error", Napi::String::New(env, "Failed to aquire next frame: " + std::system_category().message(hr)));
+		result.result = RESULT_ERROR;
+		result.error = "Failed to aquire next frame: " + std::system_category().message(hr);
         return result;
     }
 
@@ -148,8 +145,8 @@ Napi::Value DesktopDuplication::getFrame(const Napi::CallbackInfo &info) {
     DesktopResource = nullptr;
 
     if (FAILED(hr)) {
-		result.Set("result", "error");
-		result.Set("error", Napi::String::New(env, "Failed to QI for ID3D11Texture2D from acquired IDXGIResource: " + std::system_category().message(hr)));
+		result.result = RESULT_ERROR;
+		result.error = "Failed to QI for ID3D11Texture2D from acquired IDXGIResource: " + std::system_category().message(hr);
         return result;
     }
 
@@ -173,8 +170,8 @@ Napi::Value DesktopDuplication::getFrame(const Napi::CallbackInfo &info) {
 
 	hr = m_Device->CreateTexture2D(&stagingTextureDesc, nullptr, &stagingTexture);
     if (FAILED(hr)) {
-		result.Set("result", "error");
-		result.Set("error", Napi::String::New(env, "Failed to create shared surface: " + std::system_category().message(hr)));
+		result.result = RESULT_ERROR;
+		result.error = "Failed to create shared surface: " + std::system_category().message(hr);
 		return result;
 	}
 
@@ -186,26 +183,68 @@ Napi::Value DesktopDuplication::getFrame(const Napi::CallbackInfo &info) {
 	hr = m_Context->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &resourceAccess);
 
 	if (FAILED(hr)) {
-		result.Set("result", "error");
-		result.Set("error", Napi::String::New(env, "Failed to get pointer to the data contined in the shared texture: " + std::system_category().message(hr)));
+		result.result = RESULT_ERROR;
+		result.error = "Failed to get pointer to the data contined in the shared texture: " + std::system_category().message(hr);
         return result;
     }
 
 	void* imgData = malloc(stagingTextureDesc.Width * stagingTextureDesc.Height * 4);
 	memcpy(imgData, resourceAccess.pData, stagingTextureDesc.Width * stagingTextureDesc.Height * 4);
 
-	Napi::Buffer<char> buf = Napi::Buffer<char>::New(env, reinterpret_cast<char*>(imgData), stagingTextureDesc.Width * stagingTextureDesc.Height * 4, [](Napi::Env env, char* data) { free(data); } );
+	char* data = reinterpret_cast<char*>(imgData);
+
+	// change memory layout from BGRA to RGBA
+
+	char temp;
+	for(uint32_t i = 0; i < stagingTextureDesc.Width * stagingTextureDesc.Height * 4; i += 4) {
+		temp = data[i + 2];
+		data[i + 2] = data[i];
+		data[i] = temp;
+	}
 
 	m_Context->Unmap(stagingTexture, 0);
 	stagingTexture->Release();
 	m_DesktopDup->ReleaseFrame();
 
-	result.Set("result", "success");
-	result.Set("data", buf);
-	result.Set("width", Napi::Number::New(env, (double)stagingTextureDesc.Width));
-	result.Set("height", Napi::Number::New(env, (double)stagingTextureDesc.Height));
+	result.result = RESULT_SUCCESS;
+	result.data = data;
+	result.width = stagingTextureDesc.Width;
+	result.height = stagingTextureDesc.Height;
 
 	return result;
+}
+
+Napi::Value DesktopDuplication::wrap_getFrame(const Napi::CallbackInfo &info) {
+	Napi::Env env = info.Env();
+
+	FRAME_DATA frame = this->getFrame();
+
+	Napi::Object result = Napi::Object::New(env);
+
+	result.Set("error", env.Null());
+
+	switch(frame.result) {
+		case RESULT_TIMEOUT:
+			result.Set("result", "timeout");
+			return result;
+		case RESULT_ACCESSLOST:
+			result.Set("result", "accesslost");
+			return result;
+		case RESULT_ERROR:
+			result.Set("result", "error");
+			result.Set("error", Napi::String::New(env, frame.error));
+		case RESULT_SUCCESS: {
+			Napi::Buffer<char> buf = Napi::Buffer<char>::New(env, frame.data, frame.width * frame.height * 4, [](Napi::Env env, char* data) { free(data); } );
+
+			result.Set("result", "success");
+			result.Set("data", buf);
+			result.Set("width", Napi::Number::New(env, (double)frame.width));
+			result.Set("height", Napi::Number::New(env, (double)frame.height));
+			return result;
+		}
+		default:
+			return env.Null();
+	}
 }
 
 DesktopDuplication::~DesktopDuplication() {
@@ -239,7 +278,7 @@ Napi::FunctionReference DesktopDuplication::constructor;
 Napi::Object DesktopDuplication::Init(Napi::Env env, Napi::Object exports) {
 	Napi::Function func = DefineClass(env, "DesktopDuplication", {
 		InstanceMethod("initialize", &DesktopDuplication::initialize),
-		InstanceMethod("getFrame", &DesktopDuplication::getFrame)
+		InstanceMethod("getFrame", &DesktopDuplication::wrap_getFrame)
     });
 
 	constructor = Napi::Persistent(func);
