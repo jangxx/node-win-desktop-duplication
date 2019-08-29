@@ -3,6 +3,7 @@
 		{
 			"target_name": "desktopduplication",
 			"sources": [
+				"src/getframeasyncworker.cpp",
 				"src/desktopduplication.cpp"
 			],
 			"include_dirs": [

@@ -2,25 +2,12 @@
 
 #include "napi.h"
 
-#include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <system_error>
 
-enum RESULT_TYPE {
-	RESULT_SUCCESS,
-	RESULT_ERROR,
-	RESULT_TIMEOUT,
-	RESULT_ACCESSLOST
-};
-
-typedef struct {
-	RESULT_TYPE result;
-	std::string error;
-	char* data;
-	UINT width;
-	UINT height;
-} FRAME_DATA;
+#include "types.h"
+#include "getframeasyncworker.h"
 
 class DesktopDuplication : public Napi::ObjectWrap<DesktopDuplication> {
 	public:
@@ -28,8 +15,9 @@ class DesktopDuplication : public Napi::ObjectWrap<DesktopDuplication> {
 		
 		DesktopDuplication(const Napi::CallbackInfo &info);
 		void initialize(const Napi::CallbackInfo &info);
-		FRAME_DATA getFrame();
+		FRAME_DATA getFrame(UINT timeout);
 		Napi::Value wrap_getFrame(const Napi::CallbackInfo &info);
+		void getFrameAsync(const Napi::CallbackInfo &info);
 		~DesktopDuplication();
 
 	private:

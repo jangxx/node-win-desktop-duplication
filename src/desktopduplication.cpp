@@ -108,14 +108,14 @@ void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
 	}
 }
 
-FRAME_DATA DesktopDuplication::getFrame() {
+FRAME_DATA DesktopDuplication::getFrame(UINT timeout) {
 	FRAME_DATA result;	
 
 	IDXGIResource* DesktopResource = nullptr;
     DXGI_OUTDUPL_FRAME_INFO FrameInfo;
 
     // Get new frame
-    HRESULT hr = m_DesktopDup->AcquireNextFrame(1000, &FrameInfo, &DesktopResource);
+    HRESULT hr = m_DesktopDup->AcquireNextFrame(timeout, &FrameInfo, &DesktopResource);
 
     if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
 		result.result = RESULT_TIMEOUT;
@@ -214,10 +214,19 @@ FRAME_DATA DesktopDuplication::getFrame() {
 	return result;
 }
 
+void DesktopDuplication::getFrameAsync(const Napi::CallbackInfo &info) {
+	Napi::Env env = info.Env();
+
+	Napi::Function callback = info[0].As<Napi::Function>();
+
+	GetFrameAsyncWorker* worker = new GetFrameAsyncWorker(this, callback);
+	worker->Queue();
+}
+
 Napi::Value DesktopDuplication::wrap_getFrame(const Napi::CallbackInfo &info) {
 	Napi::Env env = info.Env();
 
-	FRAME_DATA frame = this->getFrame();
+	FRAME_DATA frame = this->getFrame(1000);
 
 	Napi::Object result = Napi::Object::New(env);
 
@@ -278,7 +287,8 @@ Napi::FunctionReference DesktopDuplication::constructor;
 Napi::Object DesktopDuplication::Init(Napi::Env env, Napi::Object exports) {
 	Napi::Function func = DefineClass(env, "DesktopDuplication", {
 		InstanceMethod("initialize", &DesktopDuplication::initialize),
-		InstanceMethod("getFrame", &DesktopDuplication::wrap_getFrame)
+		InstanceMethod("getFrame", &DesktopDuplication::wrap_getFrame),
+		InstanceMethod("getFrameAsync", &DesktopDuplication::getFrameAsync)
     });
 
 	constructor = Napi::Persistent(func);
