@@ -1,6 +1,9 @@
 #pragma once
 
 #include <windows.h>
+#include <chrono>
+#include <thread>
+#include <future>
 
 enum RESULT_TYPE {
 	RESULT_SUCCESS,

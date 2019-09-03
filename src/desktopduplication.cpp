@@ -1,15 +1,22 @@
 #include "desktopduplication.h"
 
-DesktopDuplication::DesktopDuplication(const Napi::CallbackInfo &info) : Napi::ObjectWrap<DesktopDuplication>(info), m_Device(nullptr), m_Context(nullptr), m_DesktopDup(nullptr), m_LastImage(nullptr) {
+DesktopDuplication::DesktopDuplication(const Napi::CallbackInfo &info) : 
+	Napi::ObjectWrap<DesktopDuplication>(info), 
+	m_Device(nullptr), 
+	m_Context(nullptr), 
+	m_DesktopDup(nullptr), 
+	m_LastImage(nullptr),
+	m_LastImageThread(nullptr),
+	m_stagingTextureThread(nullptr),
+	m_autoCaptureThreadStarted(false)
+{
 	UINT outputNum = info[0].As<Napi::Number>().Uint32Value();
 	m_OutputNumber = outputNum;
 
 	RtlZeroMemory(&m_OutputDesc, sizeof(m_OutputDesc));
 }
 
-void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
-	Napi::Env env = info.Env();
-
+std::string DesktopDuplication::initialize() {
 	// call cleanup so we can call this function multiple times without memory leaks
 	cleanUp();
 
@@ -44,17 +51,15 @@ void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
 		}
 	}
 	if (FAILED(hr)) {
-		Napi::Error::New(env, "Failed to create device: " + std::system_category().message(hr)).ThrowAsJavaScriptException();
-		return;
+		return "Failed to create device: " + std::system_category().message(hr);
 	}
 
 	 // Get DXGI device
 	IDXGIDevice* DxgiDevice = nullptr;
 	hr = m_Device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void**>(&DxgiDevice));
 	if (FAILED(hr)) {
-		Napi::Error::New(env, "Failed to query interface for DXGI Device: " + std::system_category().message(hr)).ThrowAsJavaScriptException();
 		cleanUp();
-		return;
+		return "Failed to query interface for DXGI Device: " + std::system_category().message(hr);
 	}
 
 	// Get DXGI adapter
@@ -63,9 +68,8 @@ void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
 	DxgiDevice->Release();
 	DxgiDevice = nullptr;
 	if (FAILED(hr)) {
-		Napi::Error::New(env, "Failed to get parent DXGI Adapter: " + std::system_category().message(hr)).ThrowAsJavaScriptException();
 		cleanUp();
-		return;
+		return "Failed to get parent DXGI Adapter: " + std::system_category().message(hr);
 	}
 
 	// Get output
@@ -74,9 +78,8 @@ void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
 	DxgiAdapter->Release();
 	DxgiAdapter = nullptr;
 	if (FAILED(hr)) {
-		Napi::Error::New(env, "Failed to get specified output: " + std::system_category().message(hr)).ThrowAsJavaScriptException();
 		cleanUp();
-		return;
+		return "Failed to get specified output: " + std::system_category().message(hr);
 	}
 
 	DxgiOutput->GetDesc(&m_OutputDesc);
@@ -87,9 +90,8 @@ void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
 	DxgiOutput->Release();
 	DxgiOutput = nullptr;
 	if (FAILED(hr)) {
-		Napi::Error::New(env, "Failed to query interface for DxgiOutput1: " + std::system_category().message(hr)).ThrowAsJavaScriptException();
 		cleanUp();
-		return;
+		return "Failed to query interface for DxgiOutput1: " + std::system_category().message(hr);
 	}
 
 	// Create desktop duplication
@@ -98,17 +100,26 @@ void DesktopDuplication::initialize(const Napi::CallbackInfo &info) {
 	DxgiOutput1 = nullptr;
 	if (FAILED(hr)) {
 		if (hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE) {
-			Napi::Error::New(env, "There is already the maximum number of applications using the Desktop Duplication API running, please close one of those applications and then try again.").ThrowAsJavaScriptException();
-			return;
+			return "There is already the maximum number of applications using the Desktop Duplication API running, please close one of those applications and then try again.";
 		}
-
-		Napi::Error::New(env, "Failed to get duplicate output: " + std::system_category().message(hr)).ThrowAsJavaScriptException();
 		cleanUp();
-		return;
+		return "Failed to get duplicate output: " + std::system_category().message(hr);
+	}
+
+	return "";
+}
+
+void DesktopDuplication::wrap_initialize(const Napi::CallbackInfo &info) {
+	Napi::Env env = info.Env();
+
+	std::string error = initialize();
+
+	if (error != "") {
+		Napi::Error::New(env, error).ThrowAsJavaScriptException();
 	}
 }
 
-FRAME_DATA DesktopDuplication::getFrame(UINT timeout) {
+FRAME_DATA DesktopDuplication::getFrame(UINT timeout, bool fromThread) {
 	FRAME_DATA result;	
 
 	IDXGIResource* DesktopResource = nullptr;
@@ -133,14 +144,27 @@ FRAME_DATA DesktopDuplication::getFrame(UINT timeout) {
         return result;
     }
 
-    // If still holding old frame, destroy it
-    if (m_LastImage) {
-        m_LastImage->Release();
-        m_LastImage = nullptr;
-    }
+    
+	if (fromThread) {
+		// If still holding old frame, destroy it
+		if (m_LastImageThread) {
+			m_LastImageThread->Release();
+			m_LastImageThread = nullptr;
+		}
 
-    // QI for IDXGIResource
-    hr = DesktopResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void **>(&m_LastImage));
+		// QI for IDXGIResource
+    	hr = DesktopResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void **>(&m_LastImageThread));
+	} else {
+		// If still holding old frame, destroy it
+		if (m_LastImage) {
+			m_LastImage->Release();
+			m_LastImage = nullptr;
+		}
+
+		// QI for IDXGIResource
+    	hr = DesktopResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void **>(&m_LastImage));
+	}
+    
     DesktopResource->Release();
     DesktopResource = nullptr;
 
@@ -151,30 +175,48 @@ FRAME_DATA DesktopDuplication::getFrame(UINT timeout) {
     }
 
 	D3D11_TEXTURE2D_DESC frameDesc;
-	m_LastImage->GetDesc(&frameDesc);
+	if (fromThread) {
+		m_LastImageThread->GetDesc(&frameDesc);
+	} else {
+		m_LastImage->GetDesc(&frameDesc);
+	}
 
-	// create shared surface to copy aquired image to
 	D3D11_TEXTURE2D_DESC stagingTextureDesc;
-    stagingTextureDesc.Width = frameDesc.Width;
-    stagingTextureDesc.Height = frameDesc.Height;
-    stagingTextureDesc.MipLevels = frameDesc.MipLevels;
-    stagingTextureDesc.ArraySize = 1;
-    stagingTextureDesc.Format = frameDesc.Format;
-    stagingTextureDesc.SampleDesc = frameDesc.SampleDesc;
-    stagingTextureDesc.Usage = D3D11_USAGE_STAGING;
-    stagingTextureDesc.BindFlags = 0;
-    stagingTextureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    stagingTextureDesc.MiscFlags = 0;
+	stagingTextureDesc.Width = frameDesc.Width;
+	stagingTextureDesc.Height = frameDesc.Height;
+	stagingTextureDesc.MipLevels = frameDesc.MipLevels;
+	stagingTextureDesc.ArraySize = 1;
+	stagingTextureDesc.Format = frameDesc.Format;
+	stagingTextureDesc.SampleDesc = frameDesc.SampleDesc;
+	stagingTextureDesc.Usage = D3D11_USAGE_STAGING;
+	stagingTextureDesc.BindFlags = 0;
+	stagingTextureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	stagingTextureDesc.MiscFlags = 0;
 
 	ID3D11Texture2D* stagingTexture = nullptr;
 
-	hr = m_Device->CreateTexture2D(&stagingTextureDesc, nullptr, &stagingTexture);
-    if (FAILED(hr)) {
-		result.result = RESULT_ERROR;
-		result.error = "Failed to create shared surface: " + std::system_category().message(hr);
-		return result;
-	}
+	if (fromThread) {
+		// only set up new shared surface if we have not done so before
+		if (!m_stagingTextureThread) {
+			hr = m_Device->CreateTexture2D(&stagingTextureDesc, nullptr, &m_stagingTextureThread);
+			if (FAILED(hr)) {
+				result.result = RESULT_ERROR;
+				result.error = "Failed to create shared surface: " + std::system_category().message(hr);
+				return result;
+			}
+		}
 
+		stagingTexture = m_stagingTextureThread; // use the shared texture we use in every thread iteration
+	} else {
+		// create shared surface to copy aquired image to
+		hr = m_Device->CreateTexture2D(&stagingTextureDesc, nullptr, &stagingTexture);
+		if (FAILED(hr)) {
+			result.result = RESULT_ERROR;
+			result.error = "Failed to create shared surface: " + std::system_category().message(hr);
+			return result;
+		}		
+	}
+	
 	// copy frame into shared texture
 	m_Context->CopyResource(stagingTexture, m_LastImage);
 
@@ -203,7 +245,9 @@ FRAME_DATA DesktopDuplication::getFrame(UINT timeout) {
 	}
 
 	m_Context->Unmap(stagingTexture, 0);
-	stagingTexture->Release();
+	if (!fromThread) { // otherwise we want to reuse the texture for performance reasons
+		stagingTexture->Release();
+	}
 	m_DesktopDup->ReleaseFrame();
 
 	result.result = RESULT_SUCCESS;
@@ -256,8 +300,68 @@ Napi::Value DesktopDuplication::wrap_getFrame(const Napi::CallbackInfo &info) {
 	}
 }
 
+Napi::Value DesktopDuplication::startAutoCapture(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+
+    if (m_autoCaptureThreadStarted) {
+        return Napi::Boolean::New(env, false);
+    }
+
+    int delay = info[0].As<Napi::Number>().Int32Value();
+	bool allow_skips = info[1].As<Napi::Boolean>().Value();
+    Napi::Function callback = info[2].As<Napi::Function>();
+
+    m_autoCaptureThreadCallback = Napi::ThreadSafeFunction::New(env, callback, "AutoCaptureThreadCallback", (allow_skips) ? 1 : 0, 1);
+
+    m_autoCaptureThreadSignal = std::promise<void>();
+
+    m_autoCaptureThread = std::thread(&DesktopDuplication::autoCaptureFn, this, delay);
+
+    m_autoCaptureThreadStarted = true;
+
+    return Napi::Boolean::New(env, true);
+}
+
+bool DesktopDuplication::stopAutoCapture() {
+    if (!m_autoCaptureThreadStarted) {
+        return false;
+    }
+
+	printf("stop!\n");
+
+    m_autoCaptureThreadSignal.set_value();
+
+    m_autoCaptureThread.join(); // wait for thread to finish
+
+	printf("joined!\n");
+
+	m_autoCaptureThreadCallback.Release();
+
+	for(auto it = m_test.begin(); it != m_test.end(); it++) {
+		printf("waited %d ms\n", *it);
+	}
+
+    m_autoCaptureThreadStarted = false;
+
+    return true;
+}
+
+Napi::Value DesktopDuplication::wrap_stopAutoCapture(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+
+    bool result = stopAutoCapture();
+
+    return Napi::Boolean::New(env, result);
+}
+
 DesktopDuplication::~DesktopDuplication() {
 	cleanUp();
+
+	if (m_autoCaptureThreadStarted) {
+		m_autoCaptureThreadSignal.set_value();
+
+		m_autoCaptureThread.join();
+	}
 }
 
 void DesktopDuplication::cleanUp() {
@@ -280,15 +384,147 @@ void DesktopDuplication::cleanUp() {
 		m_Context->Release();
 		m_Context = nullptr;
 	}
+
+	if (m_LastImageThread) {
+		m_LastImageThread->Release();
+		m_LastImageThread = nullptr;
+	}
+
+	if (m_stagingTextureThread) {
+		m_stagingTextureThread->Release();
+		m_stagingTextureThread = nullptr;
+	}
+}
+
+std::vector<int> DesktopDuplication::m_test = {};
+
+void DesktopDuplication::autoCaptureFnJsCallback(Napi::Env env, Napi::Function fn, FRAME_DATA* frame) {
+	Napi::Object result = Napi::Object::New(env);
+
+	result.Set("error", env.Null());
+
+	switch(frame->result) {
+		case RESULT_ACCESSLOST:
+			result.Set("result", "accesslost");
+		case RESULT_SUCCESS: {
+			Napi::Buffer<char> buf = Napi::Buffer<char>::New(env, frame->data, frame->width * frame->height * 4, [](Napi::Env env, char* data) { free(data); } );
+
+			result.Set("result", "success");
+			result.Set("data", buf);
+			result.Set("width", Napi::Number::New(env, (double)frame->width));
+			result.Set("height", Napi::Number::New(env, (double)frame->height));
+		}
+	}
+
+	fn.Call({ result });
+
+	free(frame);
+}
+
+void DesktopDuplication::autoCaptureFn(int delay) {
+    std::future<void> signal = m_autoCaptureThreadSignal.get_future();
+
+	auto start_test = std::chrono::high_resolution_clock::now();
+
+	// throw away one frame which seems to always be empty
+	FRAME_DATA throwaway_frame = getFrame(1000);
+	free(throwaway_frame.data);
+
+	m_test.push_back((int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_test).count());
+
+	int loop = 0;
+
+    while (signal.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout) {
+        auto start = std::chrono::high_resolution_clock::now();
+
+		// printf("loop: %d\n", loop);
+		loop++;
+
+		FRAME_DATA frame = getFrame(delay);
+
+        if (frame.result != RESULT_SUCCESS) {
+			if (frame.result == RESULT_TIMEOUT) {
+				// try to reinitialize automatically
+				std::string error = initialize();
+				if (error != "") {
+					// can't reinitialize, end thread execution and notify node
+					FRAME_DATA* fd_clone = reinterpret_cast<FRAME_DATA*>(malloc(sizeof(FRAME_DATA)));
+					memcpy(fd_clone, &frame, sizeof(FRAME_DATA));
+
+					napi_status status = m_autoCaptureThreadCallback.NonBlockingCall( fd_clone, autoCaptureFnJsCallback );
+
+					if (status != napi_ok) {
+						// free data manually if we can't transfer the responsibility to the GC
+						free(fd_clone);
+					}
+					return;
+				}
+			}
+
+            // ignore error case
+            auto finish = std::chrono::high_resolution_clock::now();
+
+            auto exTime = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start);
+
+            if (exTime.count() < delay - 1) {
+                auto waitTime = std::chrono::milliseconds{ delay - 1 } - exTime;
+                std::this_thread::sleep_for(waitTime); // wait the rest of the delay until the next screen capture
+            }
+
+            continue;
+        }
+
+		// check if have to finish before potentially blocking
+        // if (signal.wait_for(std::chrono::milliseconds(1)) != std::future_status::timeout) {
+        //     break;
+        // }
+
+		FRAME_DATA* fd_clone = reinterpret_cast<FRAME_DATA*>(malloc(sizeof(FRAME_DATA)));
+		memcpy(fd_clone, &frame, sizeof(FRAME_DATA));
+
+        napi_status status = m_autoCaptureThreadCallback.NonBlockingCall( fd_clone, autoCaptureFnJsCallback );
+
+		if (status != napi_ok) {
+			printf("skip\n");
+			// free data manually if we can't transfer the responsibility to the GC
+			free(frame.data);
+			free(fd_clone);
+		}
+
+        auto finish = std::chrono::high_resolution_clock::now();
+
+        // check if have to finish before waiting for a potentially long time
+        if (signal.wait_for(std::chrono::milliseconds(1)) != std::future_status::timeout) {
+			printf("exit before sleep\n");
+            break;
+        }
+
+        auto exTime = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start);
+
+        if (exTime.count() < delay - 1) {
+            auto waitTime = std::chrono::milliseconds{ delay - 2 } - exTime; // subtract 2ms to account for the signal waiting
+			m_test.push_back((int)waitTime.count());
+			// printf("sleep %dms\n", (int)waitTime.count());
+            std::this_thread::sleep_for(waitTime); // wait the rest of the delay until the next screen capture
+        } else {
+			m_test.push_back(-1);
+		}
+    }
+
+	// printf("loops: %d\n", loop);
+
+	// std::this_thread::sleep_for(std::chrono::milliseconds{ 500 });
 }
 
 Napi::FunctionReference DesktopDuplication::constructor;
 
 Napi::Object DesktopDuplication::Init(Napi::Env env, Napi::Object exports) {
 	Napi::Function func = DefineClass(env, "DesktopDuplication", {
-		InstanceMethod("initialize", &DesktopDuplication::initialize),
+		InstanceMethod("initialize", &DesktopDuplication::wrap_initialize),
 		InstanceMethod("getFrame", &DesktopDuplication::wrap_getFrame),
-		InstanceMethod("getFrameAsync", &DesktopDuplication::getFrameAsync)
+		InstanceMethod("getFrameAsync", &DesktopDuplication::getFrameAsync),
+		InstanceMethod("startAutoCapture", &DesktopDuplication::startAutoCapture),
+		InstanceMethod("stopAutoCapture", &DesktopDuplication::wrap_stopAutoCapture),
     });
 
 	constructor = Napi::Persistent(func);
