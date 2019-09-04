@@ -17,7 +17,12 @@
 			],
 			"libraries": [
 				"d3d11.lib"
-			]
+			],
+			"msvs_settings": {
+				"VCCLCompilerTool": {
+					"RuntimeLibrary": 2
+				},
+			},
 		}
 	]
 }

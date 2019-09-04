@@ -106,6 +106,12 @@ std::string DesktopDuplication::initialize() {
 		return "Failed to get duplicate output: " + std::system_category().message(hr);
 	}
 
+	// throw away one frame which seems to always be empty
+	FRAME_DATA throwaway_frame = getFrame(1000);
+	if (throwaway_frame.result == RESULT_SUCCESS) {
+		free(throwaway_frame.data);
+	}
+
 	return "";
 }
 
@@ -119,7 +125,7 @@ void DesktopDuplication::wrap_initialize(const Napi::CallbackInfo &info) {
 	}
 }
 
-FRAME_DATA DesktopDuplication::getFrame(UINT timeout, bool fromThread) {
+FRAME_DATA DesktopDuplication::getFrame(UINT timeout) {
 	FRAME_DATA result;	
 
 	IDXGIResource* DesktopResource = nullptr;
@@ -128,58 +134,45 @@ FRAME_DATA DesktopDuplication::getFrame(UINT timeout, bool fromThread) {
     // Get new frame
     HRESULT hr = m_DesktopDup->AcquireNextFrame(timeout, &FrameInfo, &DesktopResource);
 
-    if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-		result.result = RESULT_TIMEOUT;
-		return result;
-    }
-
 	if (hr == DXGI_ERROR_ACCESS_LOST) {
 		result.result = RESULT_ACCESSLOST;
+		m_DesktopDup->ReleaseFrame();
 		return result;
     }
 
-    if (FAILED(hr)) {
+	if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+		result.result = RESULT_TIMEOUT;
+		m_DesktopDup->ReleaseFrame();
+		return result;
+    }
+
+	if (FAILED(hr)) {
 		result.result = RESULT_ERROR;
 		result.error = "Failed to aquire next frame: " + std::system_category().message(hr);
-        return result;
-    }
-
-    
-	if (fromThread) {
-		// If still holding old frame, destroy it
-		if (m_LastImageThread) {
-			m_LastImageThread->Release();
-			m_LastImageThread = nullptr;
-		}
-
-		// QI for IDXGIResource
-    	hr = DesktopResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void **>(&m_LastImageThread));
-	} else {
-		// If still holding old frame, destroy it
-		if (m_LastImage) {
-			m_LastImage->Release();
-			m_LastImage = nullptr;
-		}
-
-		// QI for IDXGIResource
-    	hr = DesktopResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void **>(&m_LastImage));
+		m_DesktopDup->ReleaseFrame();
+		return result;
 	}
-    
-    DesktopResource->Release();
-    DesktopResource = nullptr;
 
-    if (FAILED(hr)) {
+	// If still holding old frame, destroy it
+	if (m_LastImage) {
+		m_LastImage->Release();
+		m_LastImage = nullptr;
+	}
+
+	// QI for IDXGIResource
+	hr = DesktopResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void **>(&m_LastImage));
+	DesktopResource->Release();
+	DesktopResource = nullptr;
+
+	if (FAILED(hr)) {
 		result.result = RESULT_ERROR;
 		result.error = "Failed to QI for ID3D11Texture2D from acquired IDXGIResource: " + std::system_category().message(hr);
-        return result;
-    }
+		m_DesktopDup->ReleaseFrame();
+		return result;
+	}
 
 	D3D11_TEXTURE2D_DESC frameDesc;
-	if (fromThread) {
-		m_LastImageThread->GetDesc(&frameDesc);
-	} else {
-		m_LastImage->GetDesc(&frameDesc);
-	}
+	m_LastImage->GetDesc(&frameDesc);
 
 	D3D11_TEXTURE2D_DESC stagingTextureDesc;
 	stagingTextureDesc.Width = frameDesc.Width;
@@ -195,34 +188,119 @@ FRAME_DATA DesktopDuplication::getFrame(UINT timeout, bool fromThread) {
 
 	ID3D11Texture2D* stagingTexture = nullptr;
 
-	if (fromThread) {
-		// only set up new shared surface if we have not done so before
-		if (!m_stagingTextureThread) {
-			hr = m_Device->CreateTexture2D(&stagingTextureDesc, nullptr, &m_stagingTextureThread);
-			if (FAILED(hr)) {
-				result.result = RESULT_ERROR;
-				result.error = "Failed to create shared surface: " + std::system_category().message(hr);
-				return result;
-			}
-		}
-
-		stagingTexture = m_stagingTextureThread; // use the shared texture we use in every thread iteration
-	} else {
-		// create shared surface to copy aquired image to
-		hr = m_Device->CreateTexture2D(&stagingTextureDesc, nullptr, &stagingTexture);
-		if (FAILED(hr)) {
-			result.result = RESULT_ERROR;
-			result.error = "Failed to create shared surface: " + std::system_category().message(hr);
-			return result;
-		}		
-	}
+	// create shared surface to copy aquired image to
+	hr = m_Device->CreateTexture2D(&stagingTextureDesc, nullptr, &stagingTexture);
+	if (FAILED(hr)) {
+		result.result = RESULT_ERROR;
+		result.error = "Failed to create shared surface: " + std::system_category().message(hr);
+		m_DesktopDup->ReleaseFrame();
+		return result;
+	}		
 	
 	// copy frame into shared texture
 	m_Context->CopyResource(stagingTexture, m_LastImage);
 
+	result = getFrameData(stagingTexture, stagingTextureDesc);
+
+	stagingTexture->Release();
+	m_DesktopDup->ReleaseFrame();
+
+	return result;
+}
+
+FRAME_DATA DesktopDuplication::getFrameThread(UINT timeout) {
+	FRAME_DATA result;	
+
+	IDXGIResource* DesktopResource = nullptr;
+    DXGI_OUTDUPL_FRAME_INFO FrameInfo;
+
+    // Get new frame
+    HRESULT hr = m_DesktopDup->AcquireNextFrame(timeout, &FrameInfo, &DesktopResource);
+
+	if (hr == DXGI_ERROR_ACCESS_LOST) {
+		result.result = RESULT_ACCESSLOST;
+		m_DesktopDup->ReleaseFrame();
+		return result;
+    }
+
+	if (hr == DXGI_ERROR_WAIT_TIMEOUT && !m_stagingTextureThread) {
+		result.result = RESULT_TIMEOUT;
+		m_DesktopDup->ReleaseFrame();
+		return result;
+    }
+
+	if (hr != DXGI_ERROR_WAIT_TIMEOUT) {
+		if (FAILED(hr)) {
+			result.result = RESULT_ERROR;
+			result.error = "Failed to aquire next frame: " + std::system_category().message(hr);
+			m_DesktopDup->ReleaseFrame();
+			return result;
+		}
+
+		// If still holding old frame, destroy it
+		if (m_LastImageThread) {
+			m_LastImageThread->Release();
+			m_LastImageThread = nullptr;
+		}
+
+		// QI for IDXGIResource
+		hr = DesktopResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void **>(&m_LastImageThread));
+		DesktopResource->Release();
+		DesktopResource = nullptr;
+
+		if (FAILED(hr)) {
+			result.result = RESULT_ERROR;
+			result.error = "Failed to QI for ID3D11Texture2D from acquired IDXGIResource: " + std::system_category().message(hr);
+			m_DesktopDup->ReleaseFrame();
+			return result;
+		}
+	}
+
+	D3D11_TEXTURE2D_DESC stagingTextureDesc;
+	
+	// only set up new shared surface if we have not done so before
+	if (!m_stagingTextureThread) {
+		D3D11_TEXTURE2D_DESC frameDesc;
+		m_LastImageThread->GetDesc(&frameDesc);
+
+		stagingTextureDesc.Width = frameDesc.Width;
+		stagingTextureDesc.Height = frameDesc.Height;
+		stagingTextureDesc.MipLevels = frameDesc.MipLevels;
+		stagingTextureDesc.ArraySize = 1;
+		stagingTextureDesc.Format = frameDesc.Format;
+		stagingTextureDesc.SampleDesc = frameDesc.SampleDesc;
+		stagingTextureDesc.Usage = D3D11_USAGE_STAGING;
+		stagingTextureDesc.BindFlags = 0;
+		stagingTextureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		stagingTextureDesc.MiscFlags = 0;
+
+		hr = m_Device->CreateTexture2D(&stagingTextureDesc, nullptr, &m_stagingTextureThread);
+		if (FAILED(hr)) {
+			result.result = RESULT_ERROR;
+			result.error = "Failed to create shared surface: " + std::system_category().message(hr);
+			m_DesktopDup->ReleaseFrame();
+			return result;
+		}
+	} else {
+		m_stagingTextureThread->GetDesc(&stagingTextureDesc);
+	}
+	
+	// copy frame into shared texture
+	m_Context->CopyResource(m_stagingTextureThread, m_LastImageThread);
+
+	result = getFrameData(m_stagingTextureThread, stagingTextureDesc);
+
+	m_DesktopDup->ReleaseFrame();
+
+	return result;
+}
+
+FRAME_DATA DesktopDuplication::getFrameData(ID3D11Texture2D* texture, D3D11_TEXTURE2D_DESC& textureDesc) {
+	FRAME_DATA result;
+
 	D3D11_MAPPED_SUBRESOURCE resourceAccess;
 
-	hr = m_Context->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &resourceAccess);
+	HRESULT hr = m_Context->Map(texture, 0, D3D11_MAP_READ, 0, &resourceAccess);
 
 	if (FAILED(hr)) {
 		result.result = RESULT_ERROR;
@@ -230,30 +308,26 @@ FRAME_DATA DesktopDuplication::getFrame(UINT timeout, bool fromThread) {
         return result;
     }
 
-	void* imgData = malloc(stagingTextureDesc.Width * stagingTextureDesc.Height * 4);
-	memcpy(imgData, resourceAccess.pData, stagingTextureDesc.Width * stagingTextureDesc.Height * 4);
+	void* imgData = malloc(textureDesc.Width * textureDesc.Height * 4);
+	memcpy(imgData, resourceAccess.pData, textureDesc.Width * textureDesc.Height * 4);
 
 	char* data = reinterpret_cast<char*>(imgData);
 
 	// change memory layout from BGRA to RGBA
 
 	char temp;
-	for(uint32_t i = 0; i < stagingTextureDesc.Width * stagingTextureDesc.Height * 4; i += 4) {
+	for(uint32_t i = 0; i < textureDesc.Width * textureDesc.Height * 4; i += 4) {
 		temp = data[i + 2];
 		data[i + 2] = data[i];
 		data[i] = temp;
 	}
 
-	m_Context->Unmap(stagingTexture, 0);
-	if (!fromThread) { // otherwise we want to reuse the texture for performance reasons
-		stagingTexture->Release();
-	}
-	m_DesktopDup->ReleaseFrame();
-
 	result.result = RESULT_SUCCESS;
 	result.data = data;
-	result.width = stagingTextureDesc.Width;
-	result.height = stagingTextureDesc.Height;
+	result.width = textureDesc.Width;
+	result.height = textureDesc.Height;
+
+	m_Context->Unmap(texture, 0);
 
 	return result;
 }
@@ -327,19 +401,11 @@ bool DesktopDuplication::stopAutoCapture() {
         return false;
     }
 
-	printf("stop!\n");
-
     m_autoCaptureThreadSignal.set_value();
 
     m_autoCaptureThread.join(); // wait for thread to finish
 
-	printf("joined!\n");
-
 	m_autoCaptureThreadCallback.Release();
-
-	for(auto it = m_test.begin(); it != m_test.end(); it++) {
-		printf("waited %d ms\n", *it);
-	}
 
     m_autoCaptureThreadStarted = false;
 
@@ -396,8 +462,6 @@ void DesktopDuplication::cleanUp() {
 	}
 }
 
-std::vector<int> DesktopDuplication::m_test = {};
-
 void DesktopDuplication::autoCaptureFnJsCallback(Napi::Env env, Napi::Function fn, FRAME_DATA* frame) {
 	Napi::Object result = Napi::Object::New(env);
 
@@ -424,26 +488,13 @@ void DesktopDuplication::autoCaptureFnJsCallback(Napi::Env env, Napi::Function f
 void DesktopDuplication::autoCaptureFn(int delay) {
     std::future<void> signal = m_autoCaptureThreadSignal.get_future();
 
-	auto start_test = std::chrono::high_resolution_clock::now();
-
-	// throw away one frame which seems to always be empty
-	FRAME_DATA throwaway_frame = getFrame(1000);
-	free(throwaway_frame.data);
-
-	m_test.push_back((int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_test).count());
-
-	int loop = 0;
-
     while (signal.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout) {
         auto start = std::chrono::high_resolution_clock::now();
 
-		// printf("loop: %d\n", loop);
-		loop++;
-
-		FRAME_DATA frame = getFrame(delay);
+		FRAME_DATA frame = getFrameThread(delay);
 
         if (frame.result != RESULT_SUCCESS) {
-			if (frame.result == RESULT_TIMEOUT) {
+			if (frame.result == RESULT_ACCESSLOST) {
 				// try to reinitialize automatically
 				std::string error = initialize();
 				if (error != "") {
@@ -474,18 +525,12 @@ void DesktopDuplication::autoCaptureFn(int delay) {
             continue;
         }
 
-		// check if have to finish before potentially blocking
-        // if (signal.wait_for(std::chrono::milliseconds(1)) != std::future_status::timeout) {
-        //     break;
-        // }
-
 		FRAME_DATA* fd_clone = reinterpret_cast<FRAME_DATA*>(malloc(sizeof(FRAME_DATA)));
 		memcpy(fd_clone, &frame, sizeof(FRAME_DATA));
 
         napi_status status = m_autoCaptureThreadCallback.NonBlockingCall( fd_clone, autoCaptureFnJsCallback );
 
 		if (status != napi_ok) {
-			printf("skip\n");
 			// free data manually if we can't transfer the responsibility to the GC
 			free(frame.data);
 			free(fd_clone);
@@ -495,7 +540,6 @@ void DesktopDuplication::autoCaptureFn(int delay) {
 
         // check if have to finish before waiting for a potentially long time
         if (signal.wait_for(std::chrono::milliseconds(1)) != std::future_status::timeout) {
-			printf("exit before sleep\n");
             break;
         }
 
@@ -503,17 +547,9 @@ void DesktopDuplication::autoCaptureFn(int delay) {
 
         if (exTime.count() < delay - 1) {
             auto waitTime = std::chrono::milliseconds{ delay - 2 } - exTime; // subtract 2ms to account for the signal waiting
-			m_test.push_back((int)waitTime.count());
-			// printf("sleep %dms\n", (int)waitTime.count());
             std::this_thread::sleep_for(waitTime); // wait the rest of the delay until the next screen capture
-        } else {
-			m_test.push_back(-1);
 		}
     }
-
-	// printf("loops: %d\n", loop);
-
-	// std::this_thread::sleep_for(std::chrono::milliseconds{ 500 });
 }
 
 Napi::FunctionReference DesktopDuplication::constructor;

@@ -16,7 +16,8 @@ class DesktopDuplication : public Napi::ObjectWrap<DesktopDuplication> {
 		DesktopDuplication(const Napi::CallbackInfo &info);
 		std::string initialize();
 		void wrap_initialize(const Napi::CallbackInfo &info);
-		FRAME_DATA getFrame(UINT timeout, bool fromThread = false);
+		FRAME_DATA getFrame(UINT timeout);
+		FRAME_DATA getFrameThread(UINT timeout);
 		Napi::Value wrap_getFrame(const Napi::CallbackInfo &info);
 		void getFrameAsync(const Napi::CallbackInfo &info);
 		Napi::Value startAutoCapture(const Napi::CallbackInfo &info);
@@ -29,10 +30,9 @@ class DesktopDuplication : public Napi::ObjectWrap<DesktopDuplication> {
 		static Napi::FunctionReference constructor;
 		static void autoCaptureFnJsCallback(Napi::Env env, Napi::Function fn, FRAME_DATA* frame);
 
-		static std::vector<int> m_test;
-
 		void cleanUp();
 		void autoCaptureFn(int delay);
+		FRAME_DATA getFrameData(ID3D11Texture2D* texture, D3D11_TEXTURE2D_DESC& textureDesc);
 
 		ID3D11Device* m_Device;
 		ID3D11DeviceContext* m_Context;

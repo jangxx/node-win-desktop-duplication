@@ -4,7 +4,6 @@ const fs = require('fs');
 
 let dd = new DesktopDuplication(0);
 
-let frame;
 try {
 	dd.initialize();
 } catch(err) {

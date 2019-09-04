@@ -26,7 +26,7 @@ try {
 // work with the data in frame
 ```
 
-An example of how to write the data into a png-file can be found in the _examples/_ directory.
+More examples including an example of how to write the data into a png-file can be found in the _examples/_ directory.
 You need to install pngjs before you can use it, however (`npm i pngjs`).
 
 # Methods
