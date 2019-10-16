@@ -13,6 +13,8 @@ class DesktopDuplication : public Napi::ObjectWrap<DesktopDuplication> {
 	public:
 		static Napi::Object Init(Napi::Env env, Napi::Object exports);
 		
+		static Napi::Number getMonitorCount(const Napi::CallbackInfo &info);
+
 		DesktopDuplication(const Napi::CallbackInfo &info);
 		std::string initialize();
 		void wrap_initialize(const Napi::CallbackInfo &info);

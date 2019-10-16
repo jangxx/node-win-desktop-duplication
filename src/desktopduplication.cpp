@@ -1,5 +1,13 @@
 #include "desktopduplication.h"
 
+Napi::Number DesktopDuplication::getMonitorCount(const Napi::CallbackInfo &info) {
+	Napi::Env env = info.Env();
+
+	int monitors = GetSystemMetrics(SM_CMONITORS);
+
+	return Napi::Number::New(env, (double)monitors);
+}
+
 DesktopDuplication::DesktopDuplication(const Napi::CallbackInfo &info) : 
 	Napi::ObjectWrap<DesktopDuplication>(info), 
 	m_Device(nullptr), 
@@ -568,6 +576,7 @@ Napi::Object DesktopDuplication::Init(Napi::Env env, Napi::Object exports) {
 	constructor.SuppressDestruct();
 
 	exports.Set("DesktopDuplication", func);
+	exports.Set("getMonitorCount", Napi::Function::New(env, DesktopDuplication::getMonitorCount));
 	return exports;
 }
 
