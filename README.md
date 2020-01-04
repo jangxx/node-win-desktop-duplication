@@ -86,3 +86,15 @@ If you want to process every captured frame however, set `clearBacklog` to `fals
 Event **'frame'**  
 Emitted in an interval which duration is determined by the delay parameter in the `startAutoCapture` method.
 The event handler will be called with an object in the default image format.
+
+# Troubleshooting
+
+### Error: *Failed to aquire next frame: The application made a call that is invalid. Either the parameters of the call or the state of some object was incorrect.*
+
+This error is thrown, if multiple simultaneous requests to capture an image are attempted simultaneously.
+Different from how one might expect the DesktopDuplication to work, it does not actually simply return an image of the current desktop content.
+Instead, the user has to *request* an image and Windows will only return one, if the contents have changed since the last request.
+The request is given a timeout, which is the maximum time it will block, in case no image is returned.
+This behavior does not mesh well will multithreading however.
+Since this library only uses a single DesktopDuplication instance for all methods as well as an one second timeout, it's very easy to request two images at the same time if `getFrameAsync` or `startAutoCapture` are used.
+To avoid the error, you can either only use the blocking `getFrame`, or make sure, that no calls to `getFrame` and  `getFrameAsync` and no running auto capture thread happen at the same time.

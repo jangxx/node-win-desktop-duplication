@@ -376,6 +376,7 @@ Napi::Value DesktopDuplication::wrap_getFrame(const Napi::CallbackInfo &info) {
 		case RESULT_ERROR:
 			result.Set("result", "error");
 			result.Set("error", Napi::String::New(env, frame.error));
+			return result;
 		case RESULT_SUCCESS: {
 			Napi::Buffer<char> buf = Napi::Buffer<char>::Copy(env, frame.data, frame.width * frame.height * 4);
 
