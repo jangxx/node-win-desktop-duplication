@@ -24,7 +24,9 @@ std::vector<napi_value> GetFrameAsyncWorker::GetResult(Napi::Env env) {
 			result.Set("result", "error");
 			result.Set("error", Napi::String::New(env, m_Frame.error));
 		case RESULT_SUCCESS: {
-			Napi::Buffer<char> buf = Napi::Buffer<char>::New(env, m_Frame.data, m_Frame.width * m_Frame.height * 4, [](Napi::Env env, char* data) { free(data); } );
+			Napi::Buffer<char> buf = Napi::Buffer<char>::Copy(env, m_Frame.data, m_Frame.width * m_Frame.height * 4);
+
+			free(m_Frame.data);
 
 			result.Set("result", "success");
 			result.Set("data", buf);

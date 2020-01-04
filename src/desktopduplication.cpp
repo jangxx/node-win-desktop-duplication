@@ -317,6 +317,13 @@ FRAME_DATA DesktopDuplication::getFrameData(ID3D11Texture2D* texture, D3D11_TEXT
     }
 
 	void* imgData = malloc(textureDesc.Width * textureDesc.Height * 4);
+
+	if (imgData == 0) {
+		result.result = RESULT_ERROR;
+		result.error = "Failed to allocate memory for the frame";
+        return result;
+	}
+
 	memcpy(imgData, resourceAccess.pData, textureDesc.Width * textureDesc.Height * 4);
 
 	char* data = reinterpret_cast<char*>(imgData);
@@ -369,7 +376,9 @@ Napi::Value DesktopDuplication::wrap_getFrame(const Napi::CallbackInfo &info) {
 			result.Set("result", "error");
 			result.Set("error", Napi::String::New(env, frame.error));
 		case RESULT_SUCCESS: {
-			Napi::Buffer<char> buf = Napi::Buffer<char>::New(env, frame.data, frame.width * frame.height * 4, [](Napi::Env env, char* data) { free(data); } );
+			Napi::Buffer<char> buf = Napi::Buffer<char>::Copy(env, frame.data, frame.width * frame.height * 4);
+
+			free(frame.data);
 
 			result.Set("result", "success");
 			result.Set("data", buf);
@@ -479,7 +488,9 @@ void DesktopDuplication::autoCaptureFnJsCallback(Napi::Env env, Napi::Function f
 		case RESULT_ACCESSLOST:
 			result.Set("result", "accesslost");
 		case RESULT_SUCCESS: {
-			Napi::Buffer<char> buf = Napi::Buffer<char>::New(env, frame->data, frame->width * frame->height * 4, [](Napi::Env env, char* data) { free(data); } );
+			Napi::Buffer<char> buf = Napi::Buffer<char>::Copy(env, frame->data, frame->width * frame->height * 4);
+
+			free(frame->data);
 
 			result.Set("result", "success");
 			result.Set("data", buf);
@@ -507,15 +518,20 @@ void DesktopDuplication::autoCaptureFn(int delay) {
 				std::string error = initialize();
 				if (error != "") {
 					// can't reinitialize, end thread execution and notify node
-					FRAME_DATA* fd_clone = reinterpret_cast<FRAME_DATA*>(malloc(sizeof(FRAME_DATA)));
-					memcpy(fd_clone, &frame, sizeof(FRAME_DATA));
+					void* fd_clone_buffer = malloc(sizeof(FRAME_DATA));
 
-					napi_status status = m_autoCaptureThreadCallback.NonBlockingCall( fd_clone, autoCaptureFnJsCallback );
+					if (fd_clone_buffer != 0) { 
+						FRAME_DATA* fd_clone = reinterpret_cast<FRAME_DATA*>(fd_clone_buffer);
+						memcpy(fd_clone, &frame, sizeof(FRAME_DATA));
 
-					if (status != napi_ok) {
-						// free data manually if we can't transfer the responsibility to the GC
-						free(fd_clone);
-					}
+						napi_status status = m_autoCaptureThreadCallback.NonBlockingCall( fd_clone, autoCaptureFnJsCallback );
+
+						if (status != napi_ok) {
+							// free data manually if we can't transfer the responsibility to the GC
+							free(fd_clone);
+						}
+					} // else: can't allocate anything, so we can't even notify node
+
 					return;
 				}
 			}
@@ -533,15 +549,19 @@ void DesktopDuplication::autoCaptureFn(int delay) {
             continue;
         }
 
-		FRAME_DATA* fd_clone = reinterpret_cast<FRAME_DATA*>(malloc(sizeof(FRAME_DATA)));
-		memcpy(fd_clone, &frame, sizeof(FRAME_DATA));
+		void* fd_clone_buffer = malloc(sizeof(FRAME_DATA));
 
-        napi_status status = m_autoCaptureThreadCallback.NonBlockingCall( fd_clone, autoCaptureFnJsCallback );
+		if (fd_clone_buffer != 0) { 
+			FRAME_DATA* fd_clone = reinterpret_cast<FRAME_DATA*>(fd_clone_buffer);
+			memcpy(fd_clone, &frame, sizeof(FRAME_DATA));
 
-		if (status != napi_ok) {
-			// free data manually if we can't transfer the responsibility to the GC
-			free(frame.data);
-			free(fd_clone);
+			napi_status status = m_autoCaptureThreadCallback.NonBlockingCall( fd_clone, autoCaptureFnJsCallback );
+
+			if (status != napi_ok) {
+				// free data manually if we can't transfer the responsibility to the GC
+				free(frame.data);
+				free(fd_clone);
+			}
 		}
 
         auto finish = std::chrono::high_resolution_clock::now();
