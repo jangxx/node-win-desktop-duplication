@@ -318,7 +318,8 @@ FRAME_DATA DesktopDuplication::getFrameData(ID3D11Texture2D* texture, D3D11_TEXT
 
 	void* imgData = malloc(textureDesc.Width * textureDesc.Height * 4);
 
-	if (imgData == 0) {
+	if (imgData == NULL) {
+		m_Context->Unmap(texture, 0);
 		result.result = RESULT_ERROR;
 		result.error = "Failed to allocate memory for the frame";
         return result;
@@ -520,7 +521,7 @@ void DesktopDuplication::autoCaptureFn(int delay) {
 					// can't reinitialize, end thread execution and notify node
 					void* fd_clone_buffer = malloc(sizeof(FRAME_DATA));
 
-					if (fd_clone_buffer != 0) { 
+					if (fd_clone_buffer != NULL) { 
 						FRAME_DATA* fd_clone = reinterpret_cast<FRAME_DATA*>(fd_clone_buffer);
 						memcpy(fd_clone, &frame, sizeof(FRAME_DATA));
 
@@ -551,7 +552,7 @@ void DesktopDuplication::autoCaptureFn(int delay) {
 
 		void* fd_clone_buffer = malloc(sizeof(FRAME_DATA));
 
-		if (fd_clone_buffer != 0) { 
+		if (fd_clone_buffer != NULL) { 
 			FRAME_DATA* fd_clone = reinterpret_cast<FRAME_DATA*>(fd_clone_buffer);
 			memcpy(fd_clone, &frame, sizeof(FRAME_DATA));
 
