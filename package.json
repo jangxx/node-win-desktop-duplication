@@ -3,6 +3,7 @@
   "version": "1.0.1",
   "description": "A screengrabbing library which uses the Windows Desktop Duplication API",
   "main": "index.js",
+  "types": "index.d.ts",
   "os": [
     "win32"
   ],
