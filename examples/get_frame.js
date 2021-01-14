@@ -14,6 +14,9 @@ try {
 	process.exit(0);
 }
 
+console.log("Got frame!");
+console.log(`Width: ${frame.width} Height: ${frame.height}`);
+
 let png = new PNG({
 	width: frame.width,
 	height: frame.height

@@ -114,6 +114,10 @@ std::string DesktopDuplication::initialize() {
 		return "Failed to get duplicate output: " + std::system_category().message(hr);
 	}
 
+#ifdef DEBUG_OUTPUT
+	std::cout << "Getting one frame to throw away immediately..." << std::endl;
+#endif
+
 	// throw away one frame which seems to always be empty
 	FRAME_DATA throwaway_frame = getFrame(1000);
 	if (throwaway_frame.result == RESULT_SUCCESS) {
@@ -193,6 +197,13 @@ FRAME_DATA DesktopDuplication::getFrame(UINT timeout) {
 	stagingTextureDesc.BindFlags = 0;
 	stagingTextureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
 	stagingTextureDesc.MiscFlags = 0;
+
+#ifdef DEBUG_OUTPUT
+	std::cout << "Staging Texture Desc:" << std::endl;
+	std::cout << "\tWidth: " << stagingTextureDesc.Width << std::endl;
+	std::cout << "\tHeight: " << stagingTextureDesc.Height << std::endl;
+	std::cout << "\tFormat: " << stagingTextureDesc.Format << std::endl;
+#endif
 
 	ID3D11Texture2D* stagingTexture = nullptr;
 
@@ -315,6 +326,11 @@ FRAME_DATA DesktopDuplication::getFrameData(ID3D11Texture2D* texture, D3D11_TEXT
 		result.error = "Failed to get pointer to the data contined in the shared texture: " + std::system_category().message(hr);
         return result;
     }
+
+#ifdef DEBUG_OUTPUT
+	std::cout << "getFrameData" << std::endl;
+	std::cout << "\twidth=" << textureDesc.Width << " height=" << textureDesc.Height << " imgData_size=" << (textureDesc.Width * textureDesc.Height * 4) << std::endl;
+#endif
 
 	void* imgData = malloc(textureDesc.Width * textureDesc.Height * 4);
 

@@ -4,10 +4,13 @@
 
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <iostream>
 #include <system_error>
 
 #include "types.h"
 #include "getframeasyncworker.h"
+
+// #define DEBUG_OUTPUT
 
 class DesktopDuplication : public Napi::ObjectWrap<DesktopDuplication> {
 	public:
