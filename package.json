@@ -31,6 +31,6 @@
   },
   "homepage": "https://github.com/jangxx/node-win-desktop-duplication#readme",
   "dependencies": {
-    "node-addon-api": "^1.7.1"
+    "node-addon-api": "^1.7.2"
   }
 }
