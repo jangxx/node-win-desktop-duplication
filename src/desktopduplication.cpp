@@ -341,7 +341,12 @@ FRAME_DATA DesktopDuplication::getFrameData(ID3D11Texture2D* texture, D3D11_TEXT
         return result;
 	}
 
-	memcpy(imgData, resourceAccess.pData, textureDesc.Width * textureDesc.Height * 4);
+	// copy data row by row into the target buffer
+	char* p = (char*)resourceAccess.pData;
+	for (uint32_t y = 0; y < textureDesc.Height; y++) {
+		memcpy((char*)imgData + y * textureDesc.Width * 4, p, textureDesc.Width * 4);
+		p += resourceAccess.RowPitch;
+	}
 
 	char* data = reinterpret_cast<char*>(imgData);
 
