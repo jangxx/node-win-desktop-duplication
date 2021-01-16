@@ -1,6 +1,6 @@
 {
   "name": "windows-desktop-duplication",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A screengrabbing library which uses the Windows Desktop Duplication API",
   "main": "index.js",
   "types": "index.d.ts",
