@@ -5,9 +5,9 @@ export declare interface Frame {
     /** Buffer with the raw pixel values in RGBA order. */
     data: Buffer,
     /** Width of the captured frame. */
-    width: Number,
+    width: number,
     /** Height of the captured frame. */
-    height: Number
+    height: number
 }
 
 /** A native addon to use the Windows Desktop Duplication API. */
