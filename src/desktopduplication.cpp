@@ -141,22 +141,22 @@ FRAME_DATA DesktopDuplication::getFrame(UINT timeout) {
 	FRAME_DATA result;	
 
 	IDXGIResource* DesktopResource = nullptr;
-    DXGI_OUTDUPL_FRAME_INFO FrameInfo;
+	DXGI_OUTDUPL_FRAME_INFO FrameInfo;
 
-    // Get new frame
-    HRESULT hr = m_DesktopDup->AcquireNextFrame(timeout, &FrameInfo, &DesktopResource);
+	// Get new frame
+	HRESULT hr = m_DesktopDup->AcquireNextFrame(timeout, &FrameInfo, &DesktopResource);
 
 	if (hr == DXGI_ERROR_ACCESS_LOST) {
 		result.result = RESULT_ACCESSLOST;
 		m_DesktopDup->ReleaseFrame();
 		return result;
-    }
+	}
 
 	if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
 		result.result = RESULT_TIMEOUT;
 		m_DesktopDup->ReleaseFrame();
 		return result;
-    }
+	}
 
 	if (FAILED(hr)) {
 		result.result = RESULT_ERROR;
@@ -231,22 +231,22 @@ FRAME_DATA DesktopDuplication::getFrameThread(UINT timeout) {
 	FRAME_DATA result;	
 
 	IDXGIResource* DesktopResource = nullptr;
-    DXGI_OUTDUPL_FRAME_INFO FrameInfo;
+	DXGI_OUTDUPL_FRAME_INFO FrameInfo;
 
-    // Get new frame
-    HRESULT hr = m_DesktopDup->AcquireNextFrame(timeout, &FrameInfo, &DesktopResource);
+	// Get new frame
+	HRESULT hr = m_DesktopDup->AcquireNextFrame(timeout, &FrameInfo, &DesktopResource);
 
 	if (hr == DXGI_ERROR_ACCESS_LOST) {
 		result.result = RESULT_ACCESSLOST;
 		m_DesktopDup->ReleaseFrame();
 		return result;
-    }
+	}
 
 	if (hr == DXGI_ERROR_WAIT_TIMEOUT && !m_stagingTextureThread) {
 		result.result = RESULT_TIMEOUT;
 		m_DesktopDup->ReleaseFrame();
 		return result;
-    }
+	}
 
 	if (hr != DXGI_ERROR_WAIT_TIMEOUT) {
 		if (FAILED(hr)) {
@@ -324,8 +324,8 @@ FRAME_DATA DesktopDuplication::getFrameData(ID3D11Texture2D* texture, D3D11_TEXT
 	if (FAILED(hr)) {
 		result.result = RESULT_ERROR;
 		result.error = "Failed to get pointer to the data contined in the shared texture: " + std::system_category().message(hr);
-        return result;
-    }
+		return result;
+	}
 
 #ifdef DEBUG_OUTPUT
 	std::cout << "getFrameData" << std::endl;
@@ -338,7 +338,7 @@ FRAME_DATA DesktopDuplication::getFrameData(ID3D11Texture2D* texture, D3D11_TEXT
 		m_Context->Unmap(texture, 0);
 		result.result = RESULT_ERROR;
 		result.error = "Failed to allocate memory for the frame";
-        return result;
+		return result;
 	}
 
 	// copy data row by row into the target buffer
@@ -415,49 +415,49 @@ Napi::Value DesktopDuplication::wrap_getFrame(const Napi::CallbackInfo &info) {
 }
 
 Napi::Value DesktopDuplication::startAutoCapture(const Napi::CallbackInfo &info) {
-    Napi::Env env = info.Env();
+	Napi::Env env = info.Env();
 
-    if (m_autoCaptureThreadStarted) {
-        return Napi::Boolean::New(env, false);
-    }
+	if (m_autoCaptureThreadStarted) {
+		return Napi::Boolean::New(env, false);
+	}
 
-    int delay = info[0].As<Napi::Number>().Int32Value();
+	int delay = info[0].As<Napi::Number>().Int32Value();
 	bool allow_skips = info[1].As<Napi::Boolean>().Value();
-    Napi::Function callback = info[2].As<Napi::Function>();
+	Napi::Function callback = info[2].As<Napi::Function>();
 
-    m_autoCaptureThreadCallback = Napi::ThreadSafeFunction::New(env, callback, "AutoCaptureThreadCallback", (allow_skips) ? 1 : 0, 1);
+	m_autoCaptureThreadCallback = Napi::ThreadSafeFunction::New(env, callback, "AutoCaptureThreadCallback", (allow_skips) ? 1 : 0, 1);
 
-    m_autoCaptureThreadSignal = std::promise<void>();
+	m_autoCaptureThreadSignal = std::promise<void>();
 
-    m_autoCaptureThread = std::thread(&DesktopDuplication::autoCaptureFn, this, delay);
+	m_autoCaptureThread = std::thread(&DesktopDuplication::autoCaptureFn, this, delay);
 
-    m_autoCaptureThreadStarted = true;
+	m_autoCaptureThreadStarted = true;
 
-    return Napi::Boolean::New(env, true);
+	return Napi::Boolean::New(env, true);
 }
 
 bool DesktopDuplication::stopAutoCapture() {
-    if (!m_autoCaptureThreadStarted) {
-        return false;
-    }
+	if (!m_autoCaptureThreadStarted) {
+		return false;
+	}
 
-    m_autoCaptureThreadSignal.set_value();
+	m_autoCaptureThreadSignal.set_value();
 
-    m_autoCaptureThread.join(); // wait for thread to finish
+	m_autoCaptureThread.join(); // wait for thread to finish
 
 	m_autoCaptureThreadCallback.Release();
 
-    m_autoCaptureThreadStarted = false;
+	m_autoCaptureThreadStarted = false;
 
-    return true;
+	return true;
 }
 
 Napi::Value DesktopDuplication::wrap_stopAutoCapture(const Napi::CallbackInfo &info) {
-    Napi::Env env = info.Env();
+	Napi::Env env = info.Env();
 
-    bool result = stopAutoCapture();
+	bool result = stopAutoCapture();
 
-    return Napi::Boolean::New(env, result);
+	return Napi::Boolean::New(env, result);
 }
 
 DesktopDuplication::~DesktopDuplication() {
@@ -471,20 +471,20 @@ DesktopDuplication::~DesktopDuplication() {
 }
 
 void DesktopDuplication::cleanUp() {
-    if (m_DesktopDup) {
-        m_DesktopDup->Release();
-        m_DesktopDup = nullptr;
-    }
+	if (m_DesktopDup) {
+		m_DesktopDup->Release();
+		m_DesktopDup = nullptr;
+	}
 
-    if (m_LastImage) {
-        m_LastImage->Release();
-        m_LastImage = nullptr;
-    }
+	if (m_LastImage) {
+		m_LastImage->Release();
+		m_LastImage = nullptr;
+	}
 
-    if (m_Device) {
-        m_Device->Release();
-        m_Device = nullptr;
-    }
+	if (m_Device) {
+		m_Device->Release();
+		m_Device = nullptr;
+	}
 
 	if (m_Context) {
 		m_Context->Release();
@@ -528,14 +528,14 @@ void DesktopDuplication::autoCaptureFnJsCallback(Napi::Env env, Napi::Function f
 }
 
 void DesktopDuplication::autoCaptureFn(int delay) {
-    std::future<void> signal = m_autoCaptureThreadSignal.get_future();
+	std::future<void> signal = m_autoCaptureThreadSignal.get_future();
 
-    while (signal.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout) {
-        auto start = std::chrono::high_resolution_clock::now();
+	while (signal.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout) {
+		auto start = std::chrono::high_resolution_clock::now();
 
 		FRAME_DATA frame = getFrameThread(delay);
 
-        if (frame.result != RESULT_SUCCESS) {
+		if (frame.result != RESULT_SUCCESS) {
 			if (frame.result == RESULT_ACCESSLOST) {
 				// try to reinitialize automatically
 				std::string error = initialize();
@@ -559,18 +559,18 @@ void DesktopDuplication::autoCaptureFn(int delay) {
 				}
 			}
 
-            // ignore error case
-            auto finish = std::chrono::high_resolution_clock::now();
+			// ignore error case
+			auto finish = std::chrono::high_resolution_clock::now();
 
-            auto exTime = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start);
+			auto exTime = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start);
 
-            if (exTime.count() < delay - 1) {
-                auto waitTime = std::chrono::milliseconds{ delay - 1 } - exTime;
-                std::this_thread::sleep_for(waitTime); // wait the rest of the delay until the next screen capture
-            }
+			if (exTime.count() < delay - 1) {
+				auto waitTime = std::chrono::milliseconds{ delay - 1 } - exTime;
+				std::this_thread::sleep_for(waitTime); // wait the rest of the delay until the next screen capture
+			}
 
-            continue;
-        }
+			continue;
+		}
 
 		void* fd_clone_buffer = malloc(sizeof(FRAME_DATA));
 
@@ -587,20 +587,20 @@ void DesktopDuplication::autoCaptureFn(int delay) {
 			}
 		}
 
-        auto finish = std::chrono::high_resolution_clock::now();
+		auto finish = std::chrono::high_resolution_clock::now();
 
-        // check if have to finish before waiting for a potentially long time
-        if (signal.wait_for(std::chrono::milliseconds(1)) != std::future_status::timeout) {
-            break;
-        }
-
-        auto exTime = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start);
-
-        if (exTime.count() < delay - 1) {
-            auto waitTime = std::chrono::milliseconds{ delay - 2 } - exTime; // subtract 2ms to account for the signal waiting
-            std::this_thread::sleep_for(waitTime); // wait the rest of the delay until the next screen capture
+		// check if have to finish before waiting for a potentially long time
+		if (signal.wait_for(std::chrono::milliseconds(1)) != std::future_status::timeout) {
+			break;
 		}
-    }
+
+		auto exTime = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start);
+
+		if (exTime.count() < delay - 1) {
+			auto waitTime = std::chrono::milliseconds{ delay - 2 } - exTime; // subtract 2ms to account for the signal waiting
+			std::this_thread::sleep_for(waitTime); // wait the rest of the delay until the next screen capture
+		}
+	}
 }
 
 Napi::FunctionReference DesktopDuplication::constructor;
@@ -612,7 +612,7 @@ Napi::Object DesktopDuplication::Init(Napi::Env env, Napi::Object exports) {
 		InstanceMethod("getFrameAsync", &DesktopDuplication::getFrameAsync),
 		InstanceMethod("startAutoCapture", &DesktopDuplication::startAutoCapture),
 		InstanceMethod("stopAutoCapture", &DesktopDuplication::wrap_stopAutoCapture),
-    });
+	});
 
 	constructor = Napi::Persistent(func);
 
@@ -624,8 +624,8 @@ Napi::Object DesktopDuplication::Init(Napi::Env env, Napi::Object exports) {
 }
 
 Napi::Object Init (Napi::Env env, Napi::Object exports) {
-    DesktopDuplication::Init(env, exports);
-    return exports;
+	DesktopDuplication::Init(env, exports);
+	return exports;
 }
 
 
